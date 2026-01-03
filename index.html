@@ -1051,42 +1051,72 @@
 
             /**
              * Adapt difficulty based on performance
+             * Adaptivity Signals: Selection accuracy, Completion speed, Number of incorrect selections
              */
             adaptDifficulty() {
                 const recent = this.difficulty.recentPerformance;
-                if (recent.length < 5) return;
                 
-                const recentAccuracy = recent.slice(-5).reduce((a, b) => a + b, 0) / 5;
+                // Need at least 3 data points to start adapting
+                if (recent.length < 3) return;
+                
+                // Calculate recent accuracy (last 5 selections or all if less)
+                const recentSlice = recent.slice(-5);
+                const recentAccuracy = recentSlice.reduce((a, b) => a + b, 0) / recentSlice.length;
+                
+                // Calculate overall accuracy
                 const overallAccuracy = this.totalSelections > 0 
                     ? this.correctSelections / this.totalSelections 
                     : 1;
                 
-                // Increase difficulty if performing well
-                if (recentAccuracy >= 0.8 && overallAccuracy >= 0.75) {
-                    // Bubble count stays fixed at 3
+                // Calculate average response time (speed indicator)
+                const avgTime = this.responseTimes.length > 0
+                    ? this.responseTimes.reduce((a, b) => a + b, 0) / this.responseTimes.length
+                    : this.timeLimit;
+                
+                // Fast completion = under 8 seconds average
+                const isFast = avgTime < 8;
+                
+                // Determine if player is performing well
+                const performingWell = (recentAccuracy >= 0.7 && overallAccuracy >= 0.65) || 
+                                       (recentAccuracy >= 0.8 && isFast);
+                
+                // Determine if player is struggling
+                const struggling = recentAccuracy < 0.5 || 
+                                   (this.incorrectSelections > this.correctSelections && this.totalSelections > 6);
+                
+                // INCREASE DIFFICULTY if performing well
+                if (performingWell) {
+                    // Increase number range (affects calculation complexity)
                     if (this.difficulty.maxNumber < 50) {
-                        this.difficulty.maxNumber += 5;
+                        this.difficulty.maxNumber = Math.min(50, this.difficulty.maxNumber + 5);
                     }
+                    
                     // Progressive decimal precision: 0 -> 1 -> 2
-                    if (this.difficulty.decimalPrecision === 0 && this.currentQuestion > 6) {
+                    if (this.difficulty.decimalPrecision === 0 && this.currentQuestion >= 5) {
                         this.difficulty.decimalPrecision = 1;
-                    } else if (this.difficulty.decimalPrecision === 1 && this.currentQuestion > 14) {
+                    } else if (this.difficulty.decimalPrecision === 1 && this.currentQuestion >= 12) {
                         this.difficulty.decimalPrecision = 2;
                     }
-                    if (!this.difficulty.useFractions && this.currentQuestion > 10) {
+                    
+                    // Enable fractions after question 8
+                    if (!this.difficulty.useFractions && this.currentQuestion >= 8) {
                         this.difficulty.useFractions = true;
                     }
-                    if (!this.difficulty.mixOperators && this.currentQuestion > 15) {
+                    
+                    // Enable mixed operators after question 12
+                    if (!this.difficulty.mixOperators && this.currentQuestion >= 12) {
                         this.difficulty.mixOperators = true;
                     }
                 }
                 
-                // Decrease difficulty if struggling
-                if (recentAccuracy < 0.5) {
-                    // Bubble count stays fixed at 3
+                // DECREASE DIFFICULTY if struggling
+                if (struggling) {
+                    // Reduce number range
                     if (this.difficulty.maxNumber > 15) {
-                        this.difficulty.maxNumber -= 5;
+                        this.difficulty.maxNumber = Math.max(15, this.difficulty.maxNumber - 5);
                     }
+                    
+                    // Simplify: remove decimals, fractions, and mixed operators
                     this.difficulty.decimalPrecision = 0;
                     this.difficulty.useFractions = false;
                     this.difficulty.mixOperators = false;
